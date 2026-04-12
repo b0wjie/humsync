@@ -1,8 +1,17 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 
-export const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const geminiApiKey = process.env.GEMINI_API_KEY || "";
+
+function getGeminiClient() {
+  if (!geminiApiKey || geminiApiKey === "MY_GEMINI_API_KEY") {
+    throw new Error("Missing GEMINI_API_KEY. Add your Gemini API key to .env.local and restart the dev server.");
+  }
+
+  return new GoogleGenAI({ apiKey: geminiApiKey });
+}
 
 export async function generateText(prompt: string) {
+  const ai = getGeminiClient();
   const result = await ai.models.generateContent({
     model: "gemini-1.5-flash",
     contents: [{ text: prompt }]
@@ -90,6 +99,7 @@ export async function analyzeAndAddLayer(
   targetInstrument: string,
   targetRole: string
 ): Promise<StackAnalysis> {
+  const ai = getGeminiClient();
   const stackContext = currentStack.map(l => ({
     role: l.role,
     instrument: l.instrument,
@@ -215,13 +225,7 @@ export async function analyzeAndAddLayer(
 }
 
 export async function generateFullTrack(prompt: string) {
-  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
-  
-  if (!apiKey) {
-    throw new Error("API Key is missing. Please select a paid API key.");
-  }
-
-  const lyriaAi = new GoogleGenAI({ apiKey });
+  const lyriaAi = getGeminiClient();
   
   try {
     const response = await lyriaAi.models.generateContentStream({
