@@ -1,4 +1,4 @@
-import { getGeminiClient, methodNotAllowed, sendError } from "./_gemini";
+import { getGeminiClient, methodNotAllowed, sendError } from "./_gemini.js";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
