@@ -1,70 +1,19 @@
-export interface Note {
-  pitch: string;
-  duration: string;
-  time: number;
-}
+import type { LoopLayer, LoopSettings, Note } from "@/types";
+import { SOUND_PRESETS, MUSICAL_KEYS, MUSICAL_SCALES } from "@/lib/music";
 
-export interface Layer {
-  id: string;
-  role: string;
-  instrument: string;
-  frequencyZone: string;
-  audioUrl: string;
-  geminiDescription: string;
-  spectrumCoverage: [number, number];
-  notes?: Note[];
-}
+export type { HumAnalysis, LoopLayer, LoopProject, LoopSettings, Note, ExportResult } from "@/types";
+export type Layer = LoopLayer;
 
-export interface StackAnalysis {
-  layerAnalysis: {
-    role: string;
-    instrument: string;
-    frequencyZone: string;
-    description: string;
-    spectrumCoverage: [number, number];
-    notes: Note[];
-  };
-  spectrumMap: {
-    [zone: string]: boolean;
-  };
-  nextSuggestion: string;
-  coverageScore: number;
-  detectedKey?: string;
-}
+export { SOUND_PRESETS, MUSICAL_KEYS, MUSICAL_SCALES };
 
 export const SPECTRUM_ZONES = [
-  { name: "Sub-bass", range: [20, 60], color: "#4c1d95" },
-  { name: "Bass", range: [60, 250], color: "#1e40af" },
-  { name: "Low-mid", range: [250, 500], color: "#1e3a8a" },
-  { name: "Mid", range: [500, 2000], color: "#1d4ed8" },
-  { name: "High-mid", range: [2000, 6000], color: "#2563eb" },
-  { name: "High", range: [6000, 12000], color: "#3b82f6" },
-  { name: "Air", range: [12000, 20000], color: "#60a5fa" },
-];
-
-export const MUSICAL_KEYS = [
-  "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
-];
-
-export const MUSICAL_SCALES = [
-  "Major", "Minor", "Pentatonic", "Dorian", "Phrygian", "Lydian", "Mixolydian"
-];
-
-export const MUSICAL_MOODS = [
-  "Melancholic", "Euphoric", "Tense", "Peaceful", "Aggressive", "Dreamy", "Nostalgic", "Cinematic"
-];
-
-export const SOUND_PRESETS = [
-  { id: "cinematic", name: "Cinematic", desc: "Epic, orchestral, and atmospheric" },
-  { id: "lofi", name: "Lo-Fi", desc: "Chill, dusty, and nostalgic" },
-  { id: "cyberpunk", name: "Cyberpunk", desc: "Aggressive, neon, and electronic" },
-  { id: "acoustic", name: "Acoustic", desc: "Natural, warm, and organic" },
-  { id: "techno", name: "Techno", desc: "Driving, repetitive, and industrial" },
-  { id: "synthwave", name: "Synthwave", desc: "80s neon, retro-futuristic" },
-  { id: "ambient", name: "Ambient", desc: "Ethereal, spacious, and calm" },
-  { id: "jazz", name: "Jazz", desc: "Smooth, complex, and sophisticated" },
-  { id: "trap", name: "Trap", desc: "Dark, bass-heavy, and rhythmic" },
-  { id: "metal", name: "Metal", desc: "Heavy, distorted, and powerful" }
+  { name: "Sub-bass", range: [20, 60], color: "#38bdf8" },
+  { name: "Bass", range: [60, 250], color: "#0ea5e9" },
+  { name: "Low-mid", range: [250, 500], color: "#22c55e" },
+  { name: "Mid", range: [500, 2000], color: "#eab308" },
+  { name: "High-mid", range: [2000, 6000], color: "#f97316" },
+  { name: "High", range: [6000, 12000], color: "#ef4444" },
+  { name: "Air", range: [12000, 20000], color: "#a855f7" },
 ];
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
@@ -101,18 +50,32 @@ export async function generateText(prompt: string) {
   return result.text;
 }
 
+export async function arrangeLoop(input: {
+  melodyNotes: Note[];
+  bars: number;
+  bpm: number;
+  key: string;
+  scale: string;
+  preset: string;
+  role: string;
+  ideaText: string;
+  existingLayers: LoopLayer[];
+}) {
+  return postJson<{ producerNotes: string; suggestedLayers: Array<{ role: string; instrument: string; description: string }> }>("/api/arrange-loop", input);
+}
+
 export async function analyzeAndAddLayer(
   audioBase64: string,
   mimeType: string,
-  currentStack: Layer[],
+  currentStack: LoopLayer[],
   selectedKey: string,
   selectedScale: string,
   selectedMood: string,
   selectedPreset: string,
   targetInstrument: string,
   targetRole: string
-): Promise<StackAnalysis> {
-  return postJson<StackAnalysis>("/api/analyze-layer", {
+) {
+  return postJson("/api/analyze-layer", {
     audioBase64,
     mimeType,
     currentStack,
@@ -131,4 +94,17 @@ export async function generateFullTrack(prompt: string) {
   if (!result.audioBase64) return null;
 
   return audioDataToObjectUrl(result.audioBase64, result.mimeType);
+}
+
+export function buildLyriaPrompt(settings: LoopSettings, layers: LoopLayer[], ideaText: string) {
+  const layerText = layers.map((layer) => `${layer.name} (${layer.role}, ${layer.instrument}): ${layer.description}`).join("\n");
+  return `Create a polished ${settings.bars}-bar ${settings.preset} loop at ${settings.bpm} BPM in ${settings.key} ${settings.scale}.
+
+User idea:
+${ideaText || "No text idea supplied. Preserve the melodic identity from the supplied loop layers."}
+
+Loop layers:
+${layerText}
+
+Keep the hummed lead recognizable. Make the output feel like a production-ready idea loop, not a finished full song.`;
 }
