@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import * as Tone from "tone";
-import { Play, Pause, Trash2, Save, Music, Square, Plus, X, ChevronRight, Sliders, Volume2, Activity } from "lucide-react";
+import { Play, Pause, Trash2, Save, Music, Square, Plus, X, ChevronRight, Sliders, Volume2, Activity, Wand2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import { SOUND_LIBRARY } from "@/constants/samples";
@@ -24,6 +24,20 @@ interface StepSequencerProps {
 const STEPS = 16;
 const NOTE_MAPPING = ["C2", "D2", "E2", "F2", "G2", "A2", "B2", "C3", "D3", "E3"];
 
+const getGhostPattern = (sampleId: string): number[] => {
+  const sample = SOUND_LIBRARY.find(s => s.id === sampleId);
+  if (!sample) return [];
+  
+  if (sample.category === "kick") return [0, 4, 8, 12];
+  if (sample.category === "snare") return [4, 12];
+  if (sample.category === "hihat") {
+    if (sample.name.toLowerCase().includes("open")) return [2, 6, 10, 14];
+    return [0, 2, 4, 6, 8, 10, 12, 14];
+  }
+  if (sample.category === "perc") return [3, 11];
+  return [];
+};
+
 export const StepSequencer: React.FC<StepSequencerProps> = ({ onAddLayer, bpm }) => {
   const [tracks, setTracks] = useState<Track[]>([
     { id: "t1", label: "Kick", color: "#ef4444", sampleId: "k-808", volume: 0, pan: 0, isMuted: false, isSoloed: false },
@@ -36,9 +50,11 @@ export const StepSequencer: React.FC<StepSequencerProps> = ({ onAddLayer, bpm })
     tracks.map(() => new Array(STEPS).fill(false))
   );
   
+  const [showGhostNotes, setShowGhostNotes] = useState(true);
   const [currentStep, setCurrentStep] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(0);
   const [isMenuOpen, setIsMenuOpen] = useState<string | null>(null);
 
   const samplerRef = useRef<Tone.Sampler | null>(null);
@@ -54,14 +70,30 @@ export const StepSequencer: React.FC<StepSequencerProps> = ({ onAddLayer, bpm })
       if (sample) urls[NOTE_MAPPING[i]] = sample.url;
     });
 
-    const sampler = new Tone.Sampler({
-      urls,
-      onload: () => {
-        setIsLoaded(true);
-      }
-    });
+    const notes = Object.keys(urls);
+    const total = notes.length;
+    let loadedCount = 0;
+    const buffers: Record<string, Tone.ToneAudioBuffer> = {};
 
-    samplerRef.current = sampler;
+    if (total === 0) {
+      setIsLoaded(true);
+      setLoadProgress(1);
+      return;
+    }
+
+    notes.forEach(note => {
+      const buffer = new Tone.ToneAudioBuffer(urls[note], () => {
+        buffers[note] = buffer;
+        loadedCount++;
+        setLoadProgress(loadedCount / total);
+        
+        if (loadedCount === total) {
+          const sampler = new Tone.Sampler(buffers).toDestination();
+          samplerRef.current = sampler;
+          setIsLoaded(true);
+        }
+      });
+    });
 
     tracks.forEach(track => {
       if (!volumeNodesRef.current[track.id]) {
@@ -76,7 +108,7 @@ export const StepSequencer: React.FC<StepSequencerProps> = ({ onAddLayer, bpm })
     });
 
     return () => {
-      sampler.dispose();
+      samplerRef.current?.dispose();
       Object.values(volumeNodesRef.current).forEach(v => v.dispose());
       Object.values(pannerNodesRef.current).forEach(p => p.dispose());
       volumeNodesRef.current = {};
@@ -157,6 +189,17 @@ export const StepSequencer: React.FC<StepSequencerProps> = ({ onAddLayer, bpm })
     setTracks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
   };
 
+  const applyTypicalPattern = (trackIdx: number) => {
+    const track = tracks[trackIdx];
+    const ghostPattern = getGhostPattern(track.sampleId);
+    const newGrid = [...grid];
+    newGrid[trackIdx] = [...newGrid[trackIdx]];
+    ghostPattern.forEach(step => {
+      newGrid[trackIdx][step] = true;
+    });
+    setGrid(newGrid);
+  };
+
   const addTrack = () => {
     if (tracks.length >= 10) return;
     const colors = ["#ef4444", "#3b82f6", "#eab308", "#a855f7", "#34d399", "#f472b6", "#fb923c", "#38bdf8"];
@@ -235,11 +278,20 @@ export const StepSequencer: React.FC<StepSequencerProps> = ({ onAddLayer, bpm })
              >
                {isPlaying ? <Square className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
              </button>
-             <div className="flex flex-col">
+             <div className="flex flex-col gap-1">
                <span className="text-[7px] font-mono text-secondary uppercase leading-none">Status</span>
                <span className="text-[9px] font-black uppercase text-accent">
-                 {isLoaded ? "SYNC_OK" : "LOADING_SAMPLES..."}
+                 {isLoaded ? "SYNC_OK" : `LOADING... ${Math.round(loadProgress * 100)}%`}
                </span>
+               {!isLoaded && (
+                 <div className="w-16 h-0.5 bg-white/5 rounded-full overflow-hidden">
+                   <motion.div 
+                     initial={{ width: 0 }}
+                     animate={{ width: `${loadProgress * 100}%` }}
+                     className="h-full bg-accent shadow-[0_0_5px_var(--accent-glow)]"
+                   />
+                 </div>
+               )}
              </div>
           </div>
         </div>
@@ -322,6 +374,16 @@ export const StepSequencer: React.FC<StepSequencerProps> = ({ onAddLayer, bpm })
                        className="absolute left-0 top-full mt-2 z-[100] w-48 bg-[#121418] border border-white/10 rounded-xl shadow-2xl p-2 max-h-48 overflow-y-auto"
                      >
                        <div className="mb-2 px-2 py-1 text-[7px] font-black uppercase tracking-[0.2em] text-accent border-b border-white/5">Sound Selection</div>
+                       <button
+                         onClick={() => {
+                           applyTypicalPattern(i);
+                           setIsMenuOpen(null);
+                         }}
+                         className="w-full text-left px-3 py-2 mb-2 rounded-md bg-accent/10 border border-accent/20 text-[8px] font-black uppercase tracking-widest text-accent hover:bg-accent/20 transition-colors flex items-center gap-2"
+                       >
+                         <Wand2 className="w-3 h-3" />
+                         Fill Typical Pattern
+                       </button>
                        {SOUND_LIBRARY.map(sample => (
                          <button
                            key={sample.id}
@@ -352,24 +414,45 @@ export const StepSequencer: React.FC<StepSequencerProps> = ({ onAddLayer, bpm })
             <div className="flex gap-1 overflow-x-auto">
               {grid[i].map((active, j) => {
                 const isGroupOf4 = Math.floor(j / 4) % 2 === 0;
+                const ghostPattern = getGhostPattern(track.sampleId);
+                const isGhost = ghostPattern.includes(j);
+
                 return (
                   <motion.button
                     key={j}
                     onClick={() => toggleStep(i, j)}
                     whileTap={{ scale: 0.9 }}
+                    animate={{
+                      scale: currentStep === j && active ? [1, 1.15, 1] : 1,
+                    }}
+                    transition={{ duration: 0.1 }}
                     className={cn(
-                      "w-6 h-8 rounded-[2px] border transition-all relative",
+                      "w-6 h-8 rounded-[2px] border transition-all relative flex items-center justify-center",
                       active 
                         ? "shadow-[0_0_15px_rgba(255,255,255,0.1)]" 
                         : isGroupOf4 ? "bg-[#2d3036] border-[#3a3d44]" : "bg-[#24272c] border-[#2f3239]",
-                      currentStep === j ? "after:content-[''] after:absolute after:inset-0 after:bg-white/10" : ""
+                      currentStep === j ? "after:content-[''] after:absolute after:inset-0 after:bg-white/20 after:animate-pulse" : ""
                     )}
                     style={{
-                      backgroundColor: active ? track.color : undefined,
+                      backgroundColor: active ? (currentStep === j ? "#fff" : track.color) : undefined,
                       borderColor: active ? `${track.color}aa` : undefined,
-                      boxShadow: active ? `0 0 15px ${track.color}44, inset 0 0 5px rgba(255,255,255,0.2)` : undefined
+                      boxShadow: active 
+                        ? (currentStep === j 
+                            ? `0 0 25px #fff, 0 0 10px ${track.color}` 
+                            : `0 0 15px ${track.color}44, inset 0 0 5px rgba(255,255,255,0.2)`) 
+                        : undefined
                     }}
                   >
+                    {!active && isGhost && showGhostNotes && (
+                      <div 
+                        className="w-1.5 h-1.5 rounded-full transition-opacity"
+                        style={{ 
+                          backgroundColor: track.color,
+                          opacity: 0.15,
+                          boxShadow: `0 0 4px ${track.color}44`
+                        }}
+                      />
+                    )}
                     {currentStep === j && (
                       <div className="absolute inset-x-0 top-0 h-0.5 bg-white glow-shadow" />
                     )}
@@ -388,6 +471,17 @@ export const StepSequencer: React.FC<StepSequencerProps> = ({ onAddLayer, bpm })
             className="text-[8px] font-mono text-secondary hover:text-white transition-colors uppercase tracking-[0.2em] flex items-center gap-2"
           >
             <Trash2 className="w-3 h-3" /> Init Sequence
+          </button>
+          
+          <button 
+            onClick={() => setShowGhostNotes(!showGhostNotes)}
+            className={cn(
+              "text-[8px] font-mono transition-colors uppercase tracking-[0.2em] flex items-center gap-2",
+              showGhostNotes ? "text-accent" : "text-secondary hover:text-white"
+            )}
+          >
+            <Activity className="w-3 h-3" /> 
+            {showGhostNotes ? "Ghost Notes ON" : "Ghost Notes OFF"}
           </button>
         </div>
         

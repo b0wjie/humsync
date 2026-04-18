@@ -8,7 +8,8 @@ import { StackMixer } from "./components/StackMixer";
 import { StackVisualizer } from "./components/StackVisualizer";
 import { LayerPreview } from "./components/LayerPreview";
 import { StudioScene } from "./components/StudioScene";
-import { analyzeAndAddLayer, generateText, Layer, StackAnalysis, MUSICAL_KEYS, MUSICAL_SCALES, MUSICAL_MOODS, SOUND_PRESETS, generateFullTrack } from "./services/gemini";
+import { HarmonizationSelector } from "./components/HarmonizationSelector";
+import { analyzeAndAddLayer, generateText, Layer, StackAnalysis, MUSICAL_KEYS, MUSICAL_SCALES, MUSICAL_MOODS, SOUND_PRESETS, INSTRUMENT_PRESETS, generateFullTrack, generateHarmonizationOptions, HarmonizationOption } from "./services/gemini";
 import { motion, AnimatePresence } from "motion/react";
 import { Sparkles, Lightbulb, Download, Music, Settings2, ChevronDown, ChevronRight, ChevronLeft, Activity, Layers, Sliders, RefreshCw, Mic, Power } from "lucide-react";
 import { cn } from "./lib/utils";
@@ -90,6 +91,8 @@ export default function App() {
   const [isGeneratingLyrics, setIsGeneratingLyrics] = useState(false);
   const [isGeneratingCountermelody, setIsGeneratingCountermelody] = useState(false);
   const [isExtendingTrack, setIsExtendingTrack] = useState(false);
+  const [isHarmonizing, setIsHarmonizing] = useState(false);
+  const [harmonizationOptions, setHarmonizationOptions] = useState<HarmonizationOption[] | null>(null);
   
   const [selectedKey, setSelectedKey] = useState("C");
   const [selectedScale, setSelectedScale] = useState("Major");
@@ -135,7 +138,11 @@ export default function App() {
           audioUrl: URL.createObjectURL(blob),
           geminiDescription: analysis.layerAnalysis.description,
           spectrumCoverage: analysis.layerAnalysis.spectrumCoverage,
-          notes: analysis.layerAnalysis.notes
+          notes: analysis.layerAnalysis.notes,
+          instrumentPreset: INSTRUMENT_PRESETS[analysis.layerAnalysis.role.toLowerCase() === "foundation" ? "foundation" : 
+                            analysis.layerAnalysis.role.toLowerCase() === "lead" ? "lead" : 
+                            analysis.layerAnalysis.role.toLowerCase() === "ambiance" ? "ambiance" : 
+                            analysis.layerAnalysis.role.toLowerCase() === "texture" ? "texture" : "harmony"]?.[0]?.id || "v-analog"
         };
 
         setPendingLayer(newLayer);
@@ -151,6 +158,10 @@ export default function App() {
 
   const removeLayer = (id: string) => {
     setLayers(prev => prev.filter(l => l.id !== id));
+  };
+
+  const handleUpdateLayer = (id: string, updates: Partial<Layer>) => {
+    setLayers(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
   };
 
   const confirmLayer = () => {
@@ -174,14 +185,67 @@ export default function App() {
     setPendingAnalysis(null);
   };
 
+  const handleHarmonize = async () => {
+    if (!pendingLayer || !pendingLayer.notes) return;
+    setIsHarmonizing(true);
+    try {
+      const options = await generateHarmonizationOptions(
+        pendingLayer.notes,
+        selectedKey,
+        selectedScale,
+        selectedMood,
+        selectedPreset
+      );
+      setHarmonizationOptions(options);
+    } catch (err) {
+      console.error("Harmonization failed:", err);
+      setError("Failed to generate harmonization options.");
+    } finally {
+      setIsHarmonizing(false);
+    }
+  };
+
+  const applyHarmonization = (option: HarmonizationOption) => {
+    const newLayers: Layer[] = option.layers.map(l => ({
+      id: Math.random().toString(36).substr(2, 9),
+      role: l.role,
+      instrument: l.instrument,
+      frequencyZone: l.role === "harmony" ? "High-mid" : "Mid",
+      audioUrl: "", // Generated layers don't have hummed audio
+      geminiDescription: `AI Generated ${option.style} ${l.role}`,
+      spectrumCoverage: l.role === "harmony" ? [2000, 6000] : [500, 2000],
+      notes: l.notes,
+      instrumentPreset: l.instrumentPreset
+    }));
+
+    setLayers(prev => [...prev, ...newLayers]);
+    setHarmonizationOptions(null);
+    // Also include the original melody if it hasn't been added yet
+    if (pendingLayer) {
+      setLayers(prev => [...prev, pendingLayer]);
+      setPendingLayer(null);
+      setPendingAnalysis(null);
+    }
+  };
+
   const updatePendingInstrument = (instrument: string, role: string) => {
     if (pendingLayer) {
-      setPendingLayer({ ...pendingLayer, instrument, role });
+      const defaultPreset = INSTRUMENT_PRESETS[role.toLowerCase() === "foundation" ? "foundation" : 
+                             role.toLowerCase() === "lead" ? "lead" : 
+                             role.toLowerCase() === "ambiance" ? "ambiance" : 
+                             role.toLowerCase() === "texture" ? "texture" : "harmony"]?.[0]?.id || "v-analog";
+      setPendingLayer({ ...pendingLayer, instrument, role, instrumentPreset: defaultPreset });
     }
   };
 
   const updatePendingPreset = (preset: string) => {
     setSelectedPreset(preset);
+  };
+
+  const updatePendingInstrumentPreset = (preset: string) => {
+    if (pendingLayer) {
+      setPendingLayer({ ...pendingLayer, instrumentPreset: preset });
+    }
   };
 
   const handleExtendTrack = async () => {
@@ -515,17 +579,28 @@ export default function App() {
               className="flex flex-col gap-8"
             >
               <AnimatePresence>
-                {pendingLayer && (
+                {pendingLayer && !harmonizationOptions && (
                   <LayerPreview 
                     notes={pendingLayer.notes || []}
                     instrument={pendingLayer.instrument}
                     role={pendingLayer.role}
                     preset={selectedPreset}
+                    instrumentPreset={pendingLayer.instrumentPreset || ""}
                     onConfirm={confirmLayer}
                     onCancel={cancelLayer}
                     onUpdateInstrument={updatePendingInstrument}
                     onUpdatePreset={updatePendingPreset}
+                    onUpdateInstrumentPreset={updatePendingInstrumentPreset}
+                    onHarmonize={handleHarmonize}
+                    isHarmonizing={isHarmonizing}
                     instrumentTypes={INSTRUMENT_TYPES}
+                  />
+                )}
+                {harmonizationOptions && (
+                  <HarmonizationSelector
+                    options={harmonizationOptions}
+                    onSelect={applyHarmonization}
+                    onCancel={() => setHarmonizationOptions(null)}
                   />
                 )}
               </AnimatePresence>
@@ -603,6 +678,7 @@ export default function App() {
                   <StackMixer 
                     layers={layers} 
                     onRemoveLayer={removeLayer} 
+                    onUpdateLayer={handleUpdateLayer}
                     onFinalize={setFinalTrackUrl} 
                     bpm={bpm}
                     selectedKey={selectedKey}

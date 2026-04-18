@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as Tone from "tone";
-import { Play, Pause, Check, X, Music, Sparkles, Volume2, Sliders } from "lucide-react";
-import { Note, Layer, SOUND_PRESETS } from "@/services/gemini";
+import { Play, Pause, Check, X, Music, Sparkles, Volume2, Sliders, AudioLines } from "lucide-react";
+import { Note, Layer, SOUND_PRESETS, INSTRUMENT_PRESETS } from "@/services/gemini";
 import { cn } from "@/lib/utils";
 import { motion } from "motion/react";
 
@@ -10,10 +10,14 @@ interface LayerPreviewProps {
   instrument: string;
   role: string;
   preset: string;
+  instrumentPreset: string;
   onConfirm: () => void;
   onCancel: () => void;
   onUpdateInstrument: (instrument: string, role: string) => void;
   onUpdatePreset: (preset: string) => void;
+  onUpdateInstrumentPreset: (preset: string) => void;
+  onHarmonize: () => void;
+  isHarmonizing: boolean;
   instrumentTypes: { id: string; role: string; icon: string }[];
 }
 
@@ -22,10 +26,14 @@ export const LayerPreview: React.FC<LayerPreviewProps> = ({
   instrument,
   role,
   preset,
+  instrumentPreset,
   onConfirm,
   onCancel,
   onUpdateInstrument,
   onUpdatePreset,
+  onUpdateInstrumentPreset,
+  onHarmonize,
+  isHarmonizing,
   instrumentTypes
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -90,7 +98,102 @@ export const LayerPreview: React.FC<LayerPreviewProps> = ({
       synth = new Tone.PolySynth(Tone.Synth);
     }
 
-    // Apply preset-specific settings
+    // Apply Instrument Preset Specific Settings
+    const iRole = role === "foundation" ? "foundation" : 
+                 role === "lead" ? "lead" : 
+                 role === "ambiance" ? "ambiance" : 
+                 role === "texture" ? "texture" : "harmony";
+    
+    const iPreset = instrumentPreset || (INSTRUMENT_PRESETS[iRole]?.[0]?.id);
+
+    switch (iPreset) {
+      // Lead Presets
+      case "v-analog":
+        synth.set({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.05, release: 0.5 } });
+        break;
+      case "fm-bell":
+        if (synth instanceof Tone.PolySynth) {
+          const fm = new Tone.PolySynth(Tone.FMSynth).toDestination();
+          fm.set({ harmonicity: 2, modulationIndex: 10, envelope: { attack: 0.001, decay: 0.5, sustain: 0, release: 1 } });
+          synth.dispose();
+          synth = fm;
+        }
+        break;
+      case "acid-wasp":
+        synth.set({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.1 } });
+        filter.Q.value = 15;
+        filter.frequency.value = 800;
+        break;
+      case "super-saw":
+        // @ts-ignore
+        synth.set({ oscillator: { type: "fatsawtooth", count: 3, detune: 30 }, envelope: { attack: 0.1, release: 1 } });
+        break;
+
+      // Foundation Presets
+      case "sub-pure":
+        synth.set({ oscillator: { type: "sine" }, envelope: { attack: 0.1, release: 1 } });
+        break;
+      case "fm-grunt":
+        if (synth instanceof Tone.PolySynth) {
+          const fm = new Tone.PolySynth(Tone.FMSynth).toDestination();
+          fm.set({ modulationIndex: 20, oscillator: { type: "square" }, envelope: { attack: 0.05, release: 0.5 } });
+          synth.dispose();
+          synth = fm;
+        }
+        break;
+      case "pluck-bass":
+        synth.set({ envelope: { attack: 0.005, decay: 0.2, sustain: 0, release: 0.2 } });
+        break;
+      case "moogish":
+        synth.set({ oscillator: { type: "square" }, envelope: { attack: 0.02, decay: 0.3, sustain: 0.4, release: 0.8 } });
+        distortion.distortion = 0.3;
+        break;
+
+      // Harmony/Keys Presets
+      case "poly-pluck":
+        synth.set({ envelope: { attack: 0.005, decay: 0.3, sustain: 0.1, release: 0.5 } });
+        reverb.wet.value = 0.3;
+        break;
+      case "dream-keys":
+        synth.set({ oscillator: { type: "triangle" }, envelope: { attack: 0.1, decay: 1, sustain: 0.5, release: 2 } });
+        reverb.wet.value = 0.5;
+        break;
+      case "fm-glass":
+        if (synth instanceof Tone.PolySynth) {
+          const fm = new Tone.PolySynth(Tone.FMSynth).toDestination();
+          fm.set({ harmonicity: 3.5, modulationIndex: 15, envelope: { attack: 0.01, decay: 0.4, sustain: 0, release: 1 } });
+          synth.dispose();
+          synth = fm;
+        }
+        break;
+
+      // Ambiance Presets
+      case "cloud-drift":
+        synth.set({ envelope: { attack: 2, release: 4 } });
+        reverb.wet.value = 0.7;
+        break;
+      case "space-pad":
+        // @ts-ignore
+        synth.set({ oscillator: { type: "fmsine", modulationType: "square" }, envelope: { attack: 1, sustain: 1, release: 3 } });
+        break;
+      case "vocal-haze":
+        synth.set({ oscillator: { type: "triangle" }, envelope: { attack: 1.5, release: 5 } });
+        filter.frequency.value = 1200;
+        filter.Q.value = 4;
+        break;
+
+      // Texture Presets
+      case "dust-grain":
+        bitCrusher.wet.value = 0.6;
+        bitCrusher.bits.value = 4;
+        break;
+      case "retro-noise":
+        distortion.distortion = 0.4;
+        bitCrusher.wet.value = 0.2;
+        break;
+    }
+
+    // Apply aesthetic preset-specific settings (overrides device settings if needed)
     switch (preset) {
       case "boom-bap":
         bitCrusher.wet.value = 0.3;
@@ -176,7 +279,7 @@ export const LayerPreview: React.FC<LayerPreviewProps> = ({
       reverb.dispose();
       if (partRef.current) partRef.current.dispose();
     };
-  }, [notes, instrument, role, preset, modIndex, modType, filterDepth]);
+  }, [notes, instrument, role, preset, instrumentPreset, modIndex, modType, filterDepth]);
 
   const togglePlay = async () => {
     if (isPlaying) {
@@ -226,11 +329,11 @@ export const LayerPreview: React.FC<LayerPreviewProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="space-y-4">
           <div className="flex items-center gap-2 mb-2">
             <Volume2 className="w-4 h-4 text-accent" />
-            <h4 className="text-[10px] font-mono uppercase tracking-widest">Audition Sound</h4>
+            <h4 className="text-[10px] font-mono uppercase tracking-widest">Instrument Type</h4>
           </div>
           
           <div className="grid grid-cols-1 gap-2">
@@ -239,7 +342,7 @@ export const LayerPreview: React.FC<LayerPreviewProps> = ({
                 key={type.id}
                 onClick={() => onUpdateInstrument(type.id, type.role)}
                 className={cn(
-                  "flex items-center justify-between p-3 rounded-lg border transition-all",
+                  "flex items-center justify-between p-3 rounded-lg border transition-all text-left",
                   instrument === type.id 
                     ? "bg-accent/10 border-accent text-accent" 
                     : "bg-black/20 border-border/30 text-secondary hover:border-border/60"
@@ -257,8 +360,36 @@ export const LayerPreview: React.FC<LayerPreviewProps> = ({
 
         <div className="space-y-4">
           <div className="flex items-center gap-2 mb-2">
+            <AudioLines className="w-4 h-4 text-accent" />
+            <h4 className="text-[10px] font-mono uppercase tracking-widest">Sound Preset (Patch)</h4>
+          </div>
+          
+          <div className="grid grid-cols-1 gap-2 max-h-[240px] overflow-y-auto pr-2 custom-scrollbar">
+            {(INSTRUMENT_PRESETS[role === "foundation" ? "foundation" : 
+                               role === "lead" ? "lead" : 
+                               role === "ambiance" ? "ambiance" : 
+                               role === "texture" ? "texture" : "harmony"] || []).map(p => (
+              <button
+                key={p.id}
+                onClick={() => onUpdateInstrumentPreset(p.id)}
+                className={cn(
+                  "text-left p-3 rounded-lg border transition-all",
+                  instrumentPreset === p.id 
+                    ? "bg-accent/10 border-accent text-accent" 
+                    : "bg-black/20 border-border/30 text-secondary hover:border-border/60"
+                )}
+              >
+                <div className="text-[10px] font-bold uppercase tracking-wider mb-0.5">{p.name}</div>
+                <div className="text-[8px] opacity-60 uppercase tracking-tighter leading-tight">{p.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 mb-2">
             <Sparkles className="w-4 h-4 text-accent" />
-            <h4 className="text-[10px] font-mono uppercase tracking-widest">Aesthetic Preset</h4>
+            <h4 className="text-[10px] font-mono uppercase tracking-widest">Aesthetic Style</h4>
           </div>
           
           <div className="grid grid-cols-1 gap-2 max-h-[240px] overflow-y-auto pr-2 custom-scrollbar">
@@ -274,7 +405,7 @@ export const LayerPreview: React.FC<LayerPreviewProps> = ({
                 )}
               >
                 <div className="text-[10px] font-bold uppercase tracking-wider mb-0.5">{p.name}</div>
-                <div className="text-[8px] opacity-60 uppercase tracking-tighter">{p.desc}</div>
+                <div className="text-[8px] opacity-60 uppercase tracking-tighter leading-tight">{p.desc}</div>
               </button>
             ))}
           </div>
@@ -339,8 +470,20 @@ export const LayerPreview: React.FC<LayerPreviewProps> = ({
 
       <div className="flex items-center justify-center gap-4">
         <button 
+          onClick={onHarmonize}
+          disabled={isHarmonizing}
+          className="flex-1 py-4 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30 font-bold uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-purple-500/30 transition-all disabled:opacity-50"
+        >
+          {isHarmonizing ? (
+            <Sparkles className="w-5 h-5 animate-spin" />
+          ) : (
+            <Sparkles className="w-5 h-5" />
+          )}
+          {isHarmonizing ? "Harmonizing..." : "AI Harmonize"}
+        </button>
+        <button 
           onClick={togglePlay}
-          className="w-full py-4 rounded-xl bg-accent text-white font-bold uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-accent/90 transition-all shadow-lg shadow-accent/20"
+          className="flex-1 py-4 rounded-xl bg-accent text-white font-bold uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-accent/90 transition-all shadow-lg shadow-accent/20"
         >
           {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
           {isPlaying ? "Stop Audition" : "Start Audition"}

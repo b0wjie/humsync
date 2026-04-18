@@ -4,7 +4,7 @@ export const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function generateText(prompt: string) {
   const result = await ai.models.generateContent({
-    model: "gemini-1.5-flash",
+    model: "gemini-3-flash-preview",
     contents: [{ text: prompt }]
   });
   return result.text;
@@ -25,6 +25,15 @@ export interface Layer {
   geminiDescription: string;
   spectrumCoverage: [number, number];
   notes?: Note[];
+  instrumentPreset?: string;
+  params?: {
+    attack?: number;
+    decay?: number;
+    sustain?: number;
+    release?: number;
+    detune?: number;
+    oscillatorType?: "sine" | "square" | "sawtooth" | "triangle" | "fmsine" | "fatsawtooth";
+  };
 }
 
 export interface StackAnalysis {
@@ -85,6 +94,35 @@ export const SOUND_PRESETS = [
   { id: "dark-drill", name: "Dark Drill", desc: "Minor chords, sliding bass, and tense rhythm", category: "Aggressive" },
   { id: "lofi", name: "Lo-Fi", desc: "Chill, bits-reduced, and nostalgic", category: "Chill" }
 ];
+
+export const INSTRUMENT_PRESETS: Record<string, { id: string; name: string; desc: string }[]> = {
+  lead: [
+    { id: "v-analog", name: "Virtual Analog", desc: "Classic subtractive lead with thick saw oscillators" },
+    { id: "fm-bell", name: "FM Bell Lead", desc: "Chime-like lead with digital FM clarity" },
+    { id: "acid-wasp", name: "Acid Wasp", desc: "Resonant, squelchy filter for techno energy" },
+    { id: "super-saw", name: "HyperSaw", desc: "Dense, detuned bank of saws for modern anthems" }
+  ],
+  foundation: [
+    { id: "sub-pure", name: "Deep Sinusoidal", desc: "Clean sub-bass for low-end weight" },
+    { id: "fm-grunt", name: "FM Grunt", desc: "Gritty, aggressive textured bass" },
+    { id: "pluck-bass", name: "Snap Pluck", desc: "Short, percussive bass for rhythmic clarity" },
+    { id: "moogish", name: "Fat Analog", desc: "Warm, saturated classic monosynth bass" }
+  ],
+  harmony: [
+    { id: "poly-pluck", name: "Chiff Pluck", desc: "Airy, percussive pluck for rhythmic sequences" },
+    { id: "dream-keys", name: "Lush EP", desc: "Soft, electric piano style pad/keys" },
+    { id: "fm-glass", name: "Glass Pulse", desc: "Crystal clear digital pulses" }
+  ],
+  ambiance: [
+    { id: "cloud-drift", name: "Cloud Texture", desc: "Wandering, evolving slow attack ambiance" },
+    { id: "space-pad", name: "Nebula Pad", desc: "Wide, modulated cosmic atmosphere" },
+    { id: "vocal-haze", name: "Vocal Haze", desc: "Whispy, vocal-like evolving pads" }
+  ],
+  texture: [
+    { id: "dust-grain", name: "Granular Dust", desc: "Noisy, flickering high-end textures" },
+    { id: "retro-noise", name: "VHS Static", desc: "Warbling pitch and tape hiss texture" }
+  ]
+};
 
 export async function analyzeAndAddLayer(
   audioBase64: string, 
@@ -215,6 +253,115 @@ export async function analyzeAndAddLayer(
     return JSON.parse(text);
   } catch (error) {
     console.error("Failed to parse Gemini response:", error);
+    throw error;
+  }
+}
+
+export interface HarmonizationOption {
+  style: string; // Classical, Jazz, Pop, etc.
+  description: string;
+  layers: {
+    role: string;
+    instrument: string;
+    notes: Note[];
+    instrumentPreset: string;
+  }[];
+}
+
+export async function generateHarmonizationOptions(
+  melodyNotes: Note[],
+  selectedKey: string,
+  selectedScale: string,
+  selectedMood: string,
+  selectedPreset: string
+): Promise<HarmonizationOption[]> {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: [
+      {
+        text: `You are a professional music theorist and composer. 
+        
+        Melody Data:
+        ${JSON.stringify(melodyNotes)}
+        
+        Project Context:
+        - Key: ${selectedKey}
+        - Scale: ${selectedScale}
+        - Mood: ${selectedMood}
+        - Aesthetic: ${selectedPreset}
+        
+        Task:
+        Generate 3 distinct harmonization options based on the provided melody. 
+        Styles: "Classical", "Jazz", "Modern Pop".
+        
+        For each style, provide:
+        1. A "Harmony" layer (counter-melody or parallel harmony).
+        2. A "Chord" layer (sustained pads or rhythmic keys).
+        
+        Output MUST be a JSON array of HarmonizationOption objects.
+        Schema:
+        [
+          {
+            "style": "string",
+            "description": "string",
+            "layers": [
+              {
+                "role": "harmony",
+                "instrument": "string",
+                "notes": [{ "pitch": "string", "duration": "string", "time": number }],
+                "instrumentPreset": "string (from harmony/ambiance presets)"
+              }
+            ]
+          }
+        ]`,
+      },
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            style: { type: Type.STRING },
+            description: { type: Type.STRING },
+            layers: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  role: { type: Type.STRING },
+                  instrument: { type: Type.STRING },
+                  notes: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        pitch: { type: Type.STRING },
+                        duration: { type: Type.STRING },
+                        time: { type: Type.NUMBER }
+                      },
+                      required: ["pitch", "duration", "time"]
+                    }
+                  },
+                  instrumentPreset: { type: Type.STRING }
+                },
+                required: ["role", "instrument", "notes", "instrumentPreset"]
+              }
+            }
+          },
+          required: ["style", "description", "layers"]
+        }
+      }
+    }
+  });
+
+  try {
+    const text = response.text;
+    if (!text) throw new Error("No response from Gemini");
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("Failed to parse harmonization options:", error);
     throw error;
   }
 }

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as Tone from "tone";
 import { Play, Pause, Download, Music, Sparkles, Loader2, Volume2, Settings2, Activity, Trash2, Layers } from "lucide-react";
-import { Note, generateFullTrack, Layer, SPECTRUM_ZONES } from "@/services/gemini";
+import { Note, generateFullTrack, Layer, SPECTRUM_ZONES, INSTRUMENT_PRESETS } from "@/services/gemini";
 import { cn } from "@/lib/utils";
 import { motion } from "motion/react";
+import { VUMeter } from "./VUMeter";
 
 declare global {
   interface Window {
@@ -17,6 +18,7 @@ declare global {
 interface StackMixerProps {
   layers: Layer[];
   onRemoveLayer: (id: string) => void;
+  onUpdateLayer: (id: string, updates: Partial<Layer>) => void;
   onFinalize: (url: string) => void;
   bpm: number;
   selectedKey: string;
@@ -28,6 +30,7 @@ interface StackMixerProps {
 export const StackMixer: React.FC<StackMixerProps> = ({ 
   layers, 
   onRemoveLayer, 
+  onUpdateLayer,
   onFinalize, 
   bpm,
   selectedKey,
@@ -38,19 +41,34 @@ export const StackMixer: React.FC<StackMixerProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isGeneratingTrack, setIsGeneratingTrack] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   
   const synthsRef = useRef<{ [id: string]: Tone.PolySynth }>({});
   const partsRef = useRef<{ [id: string]: Tone.Part }>({});
+  const metersRef = useRef<{ [id: string]: Tone.Meter }>({});
+  const masterMeterRef = useRef<Tone.Meter | null>(null);
 
   useEffect(() => {
     Tone.getTransport().bpm.value = bpm;
   }, [bpm]);
 
   useEffect(() => {
+    // Setup master meter
+    if (!masterMeterRef.current) {
+      const meter = new Tone.Meter();
+      Tone.getDestination().connect(meter);
+      masterMeterRef.current = meter;
+    }
+
     // Cleanup on unmount
     return () => {
       Object.values(synthsRef.current).forEach((s: any) => s.dispose());
       Object.values(partsRef.current).forEach((p: any) => p.dispose());
+      Object.values(metersRef.current).forEach((m: any) => m.dispose());
+      if (masterMeterRef.current) {
+        masterMeterRef.current.dispose();
+        masterMeterRef.current = null;
+      }
       Tone.getTransport().stop();
     };
   }, []);
@@ -64,58 +82,137 @@ export const StackMixer: React.FC<StackMixerProps> = ({
       if (!currentLayerIds.includes(id)) {
         const synth = synthsRef.current[id];
         const part = partsRef.current[id];
+        const meter = metersRef.current[id];
         if (synth) synth.dispose();
         if (part) part.dispose();
+        if (meter) meter.dispose();
         delete synthsRef.current[id];
         delete partsRef.current[id];
+        delete metersRef.current[id];
       }
     });
 
-    // Add new synths/parts
+    // Add/Update synths/parts
     layers.forEach(layer => {
-      if (!synthsRef.current[layer.id]) {
-        let synth: Tone.PolySynth;
+      let synth = synthsRef.current[layer.id];
+      let needsRebuild = !synth;
+
+      if (needsRebuild) {
+        const role = layer.role?.toLowerCase() || "";
         
         if (layer.frequencyZone === "Bass" || layer.frequencyZone === "Sub-bass") {
-          const monoSynth = new Tone.PolySynth(Tone.MonoSynth).toDestination();
-          monoSynth.set({
-            oscillator: { type: "square" },
-            envelope: { attack: 0.1, decay: 0.2, sustain: 0.5, release: 0.8 },
-            // @ts-ignore
-            filterEnvelope: { attack: 0.01, decay: 0.1, sustain: 0.2, baseFrequency: 200, octaves: 2.6 }
-          });
-          synth = monoSynth;
-        } else if (layer.role === "lead") {
-          synth = new Tone.PolySynth(Tone.Synth).toDestination();
-          synth.set({
-            oscillator: { type: "sawtooth" },
-            envelope: { attack: 0.05, decay: 0.1, sustain: 0.3, release: 1 }
-          });
-        } else if (layer.role === "ambiance" || layer.role === "texture") {
-          const fmSynth = new Tone.PolySynth(Tone.FMSynth).toDestination();
-          fmSynth.set({
-            envelope: { attack: 1, decay: 0.5, sustain: 1, release: 3 },
-            // @ts-ignore
-            modulation: { type: "sine" },
-            modulationIndex: 10
-          });
-          synth = fmSynth;
+          synth = new Tone.PolySynth(Tone.MonoSynth).toDestination();
+        } else if (role === "lead") {
+          synth = new Tone.PolySynth(Tone.MonoSynth).toDestination();
+        } else if (role === "ambiance" || role === "texture") {
+          synth = new Tone.PolySynth(Tone.FMSynth).toDestination();
         } else {
           synth = new Tone.PolySynth(Tone.Synth).toDestination();
         }
+
+        const meter = new Tone.Meter();
+        synth.connect(meter);
+        metersRef.current[layer.id] = meter;
+
+        // Apply Preset logic
+        const iPreset = layer.instrumentPreset;
+        if (iPreset) {
+          switch (iPreset) {
+            case "v-analog":
+              synth.set({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.05, release: 0.5 } });
+              break;
+            case "fm-bell":
+              {
+                const fm = new Tone.PolySynth(Tone.FMSynth).toDestination();
+                fm.set({ harmonicity: 2, modulationIndex: 10, envelope: { attack: 0.001, decay: 0.5, sustain: 0, release: 1 } });
+                synth.dispose();
+                synth = fm;
+                synth.connect(meter);
+              }
+              break;
+            case "acid-wasp":
+              synth.set({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.1 } });
+              break;
+            case "super-saw":
+              // @ts-ignore
+              synth.set({ oscillator: { type: "fatsawtooth", count: 3, detune: 30 }, envelope: { attack: 0.1, release: 1 } });
+              break;
+            case "sub-pure":
+              synth.set({ oscillator: { type: "sine" }, envelope: { attack: 0.1, release: 1 } });
+              break;
+            case "fm-grunt":
+              {
+                const fm = new Tone.PolySynth(Tone.FMSynth).toDestination();
+                fm.set({ modulationIndex: 20, oscillator: { type: "square" }, envelope: { attack: 0.05, release: 0.5 } });
+                synth.dispose();
+                synth = fm;
+                synth.connect(meter);
+              }
+              break;
+            case "pluck-bass":
+              synth.set({ envelope: { attack: 0.005, decay: 0.2, sustain: 0, release: 0.2 } });
+              break;
+            case "poly-pluck":
+              synth.set({ envelope: { attack: 0.005, decay: 0.3, sustain: 0.1, release: 0.5 } });
+              break;
+            case "dream-keys":
+              synth.set({ oscillator: { type: "triangle" }, envelope: { attack: 0.1, decay: 1, sustain: 0.5, release: 2 } });
+              break;
+            case "fm-glass":
+              {
+                const fm = new Tone.PolySynth(Tone.FMSynth).toDestination();
+                fm.set({ harmonicity: 3.5, modulationIndex: 15, envelope: { attack: 0.01, decay: 0.4, sustain: 0, release: 1 } });
+                synth.dispose();
+                synth = fm;
+                synth.connect(meter);
+              }
+              break;
+            case "cloud-drift":
+              synth.set({ envelope: { attack: 2, release: 4 } });
+              break;
+            case "space-pad":
+              // @ts-ignore
+              synth.set({ oscillator: { type: "fmsine", modulationType: "square" }, envelope: { attack: 1, sustain: 1, release: 3 } });
+              break;
+            case "vocal-haze":
+              synth.set({ oscillator: { type: "triangle" }, envelope: { attack: 1.5, release: 5 } });
+              break;
+            case "dust-grain":
+            case "retro-noise":
+              synth.set({ envelope: { release: 0.1 } });
+              break;
+          }
+        }
         
         synthsRef.current[layer.id] = synth;
+      }
 
-        if (layer.notes) {
-          const part = new Tone.Part((time, note) => {
-            synth.triggerAttackRelease(note.pitch, note.duration, time);
-          }, layer.notes.map(n => ({ time: n.time, pitch: n.pitch, duration: n.duration })));
-          
-          part.loop = true;
-          part.loopEnd = Math.max(...layer.notes.map(n => n.time + 1), 4);
-          part.start(0);
-          partsRef.current[layer.id] = part;
+      // Apply custom parameters
+      if (layer.params && synth) {
+        const { attack, decay, sustain, release, detune, oscillatorType } = layer.params;
+        if (oscillatorType) synth.set({ oscillator: { type: oscillatorType } });
+        if (detune !== undefined) synth.set({ detune: detune });
+        
+        const env: any = {};
+        if (attack !== undefined) env.attack = attack;
+        if (decay !== undefined) env.decay = decay;
+        if (sustain !== undefined) env.sustain = sustain;
+        if (release !== undefined) env.release = release;
+        
+        if (Object.keys(env).length > 0) {
+          synth.set({ envelope: env });
         }
+      }
+
+      if (!partsRef.current[layer.id] && layer.notes) {
+        const part = new Tone.Part((time, note) => {
+          synthsRef.current[layer.id]?.triggerAttackRelease(note.pitch, note.duration, time);
+        }, layer.notes.map(n => ({ time: n.time, pitch: n.pitch, duration: n.duration })));
+        
+        part.loop = true;
+        part.loopEnd = Math.max(...layer.notes.map(n => n.time + 1), 4);
+        part.start(0);
+        partsRef.current[layer.id] = part;
       }
     });
   }, [layers]);
@@ -188,12 +285,23 @@ The final output should be a cohesive, polished composition that respects the ch
             <Layers className="w-4 h-4 text-accent" />
             <h3 className="text-[10px] font-mono uppercase tracking-widest">Active Stack</h3>
           </div>
-          <button 
-            onClick={togglePlay}
-            className="p-2 rounded-full bg-accent/10 text-accent hover:bg-accent/20 transition-colors"
-          >
-            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-[7px] font-mono text-secondary uppercase tracking-widest">Master</span>
+              <VUMeter 
+                meter={masterMeterRef.current} 
+                className="w-20" 
+                orientation="horizontal" 
+              />
+            </div>
+            <div className="h-4 w-px bg-white/10" />
+            <button 
+              onClick={togglePlay}
+              className="p-2 rounded-full bg-accent/10 text-accent hover:bg-accent/20 transition-colors"
+            >
+              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-col gap-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
@@ -217,13 +325,106 @@ The final output should be a cohesive, polished composition that respects the ch
                           {layer.role}
                         </div>
                       </div>
-                      <button 
-                        onClick={() => onRemoveLayer(layer.id)}
-                        className="p-1.5 text-secondary/40 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button 
+                          onClick={() => setEditingLayerId(editingLayerId === layer.id ? null : layer.id)}
+                          className={cn(
+                            "p-1.5 rounded-lg transition-all",
+                            editingLayerId === layer.id ? "text-accent bg-accent/10" : "text-secondary/40 hover:text-accent hover:bg-accent/10"
+                          )}
+                        >
+                          <Settings2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button 
+                          onClick={() => onRemoveLayer(layer.id)}
+                          className="p-1.5 text-secondary/40 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
+                    
+                    {editingLayerId === layer.id && (
+                      <motion.div 
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        className="mb-4 space-y-4 overflow-hidden"
+                      >
+                        <div className="p-4 bg-black/60 rounded-xl border border-white/5 space-y-4">
+                          <div className="space-y-2">
+                             <label className="text-[8px] font-mono text-secondary uppercase tracking-widest">Oscillator Type</label>
+                             <div className="grid grid-cols-3 gap-1">
+                               {["sine", "square", "sawtooth", "triangle", "fmsine", "fatsawtooth"].map(type => (
+                                 <button
+                                   key={type}
+                                   onClick={() => onUpdateLayer(layer.id, { params: { ...layer.params, oscillatorType: type as any } })}
+                                   className={cn(
+                                     "py-1.5 rounded bg-white/5 border border-white/5 text-[7px] font-black uppercase tracking-widest transition-all",
+                                     layer.params?.oscillatorType === type ? "border-accent text-accent bg-accent/5" : "hover:bg-white/10"
+                                   )}
+                                 >
+                                   {type}
+                                 </button>
+                               ))}
+                             </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            {[
+                              { label: "Attack", key: "attack", min: 0.001, max: 2, step: 0.01 },
+                              { label: "Decay", key: "decay", min: 0.1, max: 4, step: 0.1 },
+                              { label: "Sustain", key: "sustain", min: 0, max: 1, step: 0.05 },
+                              { label: "Release", key: "release", min: 0.1, max: 5, step: 0.1 }
+                            ].map(param => (
+                              <div key={param.key} className="space-y-1">
+                                <div className="flex justify-between items-center">
+                                  <label className="text-[7px] font-mono text-secondary uppercase tracking-[0.2em]">{param.label}</label>
+                                  <span className="text-[7px] font-mono text-accent">{(layer.params as any)?.[param.key] || 0.1}s</span>
+                                </div>
+                                <input 
+                                  type="range"
+                                  min={param.min}
+                                  max={param.max}
+                                  step={param.step}
+                                  value={(layer.params as any)?.[param.key] || 0.1}
+                                  onChange={(e) => onUpdateLayer(layer.id, { params: { ...layer.params, [param.key]: parseFloat(e.target.value) } })}
+                                  className="w-full h-1 bg-white/10 rounded-full appearance-none accent-accent cursor-pointer"
+                                />
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center">
+                              <label className="text-[7px] font-mono text-secondary uppercase tracking-[0.2em]">Detune / Spread</label>
+                              <span className="text-[7px] font-mono text-accent">{layer.params?.detune || 0} cents</span>
+                            </div>
+                            <input 
+                              type="range"
+                              min="-1200"
+                              max="1200"
+                              step="10"
+                              value={layer.params?.detune || 0}
+                              onChange={(e) => onUpdateLayer(layer.id, { params: { ...layer.params, detune: parseInt(e.target.value) } })}
+                              className="w-full h-1 bg-white/10 rounded-full appearance-none accent-accent cursor-pointer"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                             <label className="text-[8px] font-mono text-secondary uppercase tracking-widest">Library Presets</label>
+                             <select 
+                               value={layer.instrumentPreset || "v-analog"}
+                               onChange={(e) => onUpdateLayer(layer.id, { instrumentPreset: e.target.value })}
+                               className="w-full bg-black/40 border border-border/30 rounded-lg p-2 text-[8px] font-black uppercase tracking-widest text-white outline-none"
+                             >
+                               {Object.values(INSTRUMENT_PRESETS).flat().map(p => (
+                                 <option key={p.id} value={p.id}>{p.name}</option>
+                               ))}
+                             </select>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
                     
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-1.5">
@@ -235,13 +436,11 @@ The final output should be a cohesive, polished composition that respects the ch
                           {layer.frequencyZone}
                         </span>
                       </div>
-                      <div className="h-1 flex-1 bg-black rounded-full border border-white/5 relative overflow-hidden">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: "80%" }}
-                          className="absolute h-full bg-accent/30"
-                        />
-                      </div>
+                      <VUMeter 
+                        meter={metersRef.current[layer.id] || null} 
+                        className="flex-1" 
+                        orientation="horizontal" 
+                      />
                     </div>
                   </div>
                 </div>

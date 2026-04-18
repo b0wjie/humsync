@@ -28,7 +28,14 @@ export const DrumMachine: React.FC<DrumMachineProps> = ({ onAddLayer, bpm }) => 
   );
   const [editingPad, setEditingPad] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  
+  const filteredSamples = SOUND_LIBRARY.filter(s => 
+    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    s.category.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  
   const [isLoaded, setIsLoaded] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(0);
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -37,95 +44,115 @@ export const DrumMachine: React.FC<DrumMachineProps> = ({ onAddLayer, bpm }) => 
   const [progress, setProgress] = useState(0);
   const [metronomeOn, setMetronomeOn] = useState(false);
 
-  const samplerRef = useRef<Tone.Sampler | null>(null);
+  const playersRef = useRef<Map<string, Tone.Player>>(new Map());
+  const envelopesRef = useRef<Map<string, Tone.AmplitudeEnvelope>>(new Map());
+  const filterRef = useRef<Map<string, Tone.Filter>>(new Map());
   const startTimeRef = useRef<number>(0);
   const clickRef = useRef<Tone.MembraneSynth | null>(null);
 
+  const [padSettings, setPadSettings] = useState<Record<string, {
+    attack: number;
+    decay: number;
+    sustain: number;
+    release: number;
+    cutoff: number; 
+    resonance: number; 
+  }>>(
+    PADS.reduce((acc, pad) => ({ ...acc, [pad.id]: {
+      attack: 0.005,
+      decay: 0.2,
+      sustain: 0.1,
+      release: 0.2,
+      cutoff: 20000,
+      resonance: 0
+    }}), {})
+  );
+
   useEffect(() => {
     setIsLoaded(false);
-    const urls: Record<string, string> = {};
-    PADS.forEach(pad => {
-      const sampleId = padSamples[pad.id];
-      const sample = SOUND_LIBRARY.find(s => s.id === sampleId);
-      if (sample) urls[pad.note] = sample.url;
-    });
+    setLoadProgress(0);
 
-    const sampler = new Tone.Sampler({
-      urls,
-      onload: () => { 
-        samplerRef.current = sampler.toDestination();
-        setIsLoaded(true);
-      }
+    playersRef.current.forEach(player => player.dispose());
+    envelopesRef.current.forEach(env => env.dispose());
+    filterRef.current.forEach(filter => filter.dispose());
+    playersRef.current.clear();
+    envelopesRef.current.clear();
+    filterRef.current.clear();
+
+    const total = PADS.length;
+    let loadedCount = 0;
+
+    PADS.forEach(pad => {
+        const sampleId = padSamples[pad.id];
+        const sample = SOUND_LIBRARY.find(s => s.id === sampleId);
+        if (!sample) {
+            loadedCount++;
+            return;
+        }
+
+        const player = new Tone.Player(sample.url, () => {
+            loadedCount++;
+            setLoadProgress(Math.min(loadedCount / total, 1));
+            if (loadedCount === total) setIsLoaded(true);
+        }).toDestination();
+
+        const envelope = new Tone.AmplitudeEnvelope({
+            attack: padSettings[pad.id].attack,
+            decay: padSettings[pad.id].decay,
+            sustain: padSettings[pad.id].sustain,
+            release: padSettings[pad.id].release
+        }).toDestination();
+
+        const filter = new Tone.Filter({
+            frequency: padSettings[pad.id].cutoff,
+            Q: padSettings[pad.id].resonance,
+            type: "lowpass"
+        }).toDestination();
+
+        player.chain(filter, envelope, Tone.Destination);
+
+        playersRef.current.set(pad.id, player);
+        envelopesRef.current.set(pad.id, envelope);
+        filterRef.current.set(pad.id, filter);
     });
     
     clickRef.current = new Tone.MembraneSynth({ volume: -20 }).toDestination();
 
     return () => {
-      sampler.dispose();
+      playersRef.current.forEach(p => p.dispose());
+      envelopesRef.current.forEach(e => e.dispose());
+      filterRef.current.forEach(f => f.dispose());
       clickRef.current?.dispose();
     };
   }, [padSamples]);
 
-  // Loop progress and playback of recorded notes
-  useEffect(() => {
-    let sequence: Tone.Sequence | null = null;
-    if (isPlaying && isLoaded && samplerRef.current) {
-      sequence = new Tone.Sequence((time, step) => {
-        Tone.Draw.schedule(() => {
-          setProgress((step / (loopLength * 4)) * 100);
-        }, time);
-        
-        // Play click if metronome is on
-        if (metronomeOn && step % 4 === 0) {
-          clickRef.current?.triggerAttackRelease("C2", "32n", time);
-        }
-
-        // Play recorded notes that match this step
-        // We need to be more precise with quantization for playback
-        const sixteenthNoteSeconds = 60 / bpm / 4;
-        
-        recordedNotes.forEach(note => {
-          // Normalize quantized time to the loop
-          const noteStep = Math.round(note.time / sixteenthNoteSeconds);
-          if (noteStep % (loopLength * 4) === step) {
-            samplerRef.current?.triggerAttack(note.pitch, time);
-          }
-        });
-      }, Array.from({ length: loopLength * 4 }, (_, i) => i), "16n").start(0);
-
-      if (Tone.getTransport().state !== "started") {
-        Tone.getTransport().start();
-      }
-    } else {
-      setProgress(0);
-      // Don't stop transport here, just let the sequence cleanup handle it
-    }
-    return () => { 
-      sequence?.dispose(); 
-    };
-  }, [isPlaying, isLoaded, loopLength, bpm, recordedNotes, metronomeOn]);
-
   const triggerPad = async (id: string, note: string) => {
     if (Tone.context.state !== "running") await Tone.start();
-    if (!samplerRef.current) return;
     
-    samplerRef.current.triggerAttack(note);
-    setActivePad(id);
-    setTimeout(() => setActivePad(null), 100);
+    const player = playersRef.current.get(id);
+    const env = envelopesRef.current.get(id);
+    
+    if (player && env && player.loaded) {
+        env.triggerAttackRelease(player.buffer.duration);
+        player.start();
+        
+        setActivePad(id);
+        setTimeout(() => setActivePad(null), 100);
+        
+        if (isRecording && isPlaying) {
+          const transportTime = Tone.getTransport().seconds;
+          const relativeTime = (transportTime - startTimeRef.current) % (loopLength * (60 / bpm));
+          
+          const sixteenthNoteTime = (60 / bpm) / 4;
+          const quantizedTime = Math.round(relativeTime / sixteenthNoteTime) * sixteenthNoteTime;
 
-    if (isRecording && isPlaying) {
-      const transportTime = Tone.getTransport().seconds;
-      const relativeTime = (transportTime - startTimeRef.current) % (loopLength * (60 / bpm));
-      
-      const sixteenthNoteTime = (60 / bpm) / 4;
-      const quantizedTime = Math.round(relativeTime / sixteenthNoteTime) * sixteenthNoteTime;
-
-      setRecordedNotes(prev => [...prev, {
-        pitch: note,
-        time: quantizedTime,
-        duration: "16n",
-        velocity: 0.8
-      }]);
+          setRecordedNotes(prev => [...prev, {
+            pitch: note,
+            time: quantizedTime,
+            duration: "16n",
+            velocity: 0.8
+          }]);
+        }
     }
   };
 
@@ -156,11 +183,6 @@ export const DrumMachine: React.FC<DrumMachineProps> = ({ onAddLayer, bpm }) => 
     setIsPlaying(false);
   };
 
-  const filteredSamples = SOUND_LIBRARY.filter(s => 
-    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.category.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
   return (
     <div className="hardware-card p-6 flex flex-col gap-6 bg-black/60 border border-border/50 shadow-[0_0_50px_rgba(0,0,0,0.5)] relative">
       <AnimatePresence>
@@ -179,51 +201,71 @@ export const DrumMachine: React.FC<DrumMachineProps> = ({ onAddLayer, bpm }) => 
             >
               <div className="p-4 border-b border-white/5 flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-black uppercase tracking-[0.2em] text-white">Sample Browser</h4>
-                  <p className="text-[8px] font-mono text-secondary uppercase">Assigning to {PADS.find(p => p.id === editingPad)?.label}</p>
+                  <h4 className="text-xs font-black uppercase tracking-[0.2em] text-white">Pad Editor</h4>
+                  <p className="text-[8px] font-mono text-secondary uppercase">Refining {PADS.find(p => p.id === editingPad)?.label}</p>
                 </div>
                 <button onClick={() => setEditingPad(null)} className="p-1 text-secondary hover:text-white transition-colors">
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="p-3 border-b border-white/5 relative">
-                <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-3 h-3 text-secondary" />
-                <input 
-                  autoFocus
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="SEARCH SAMPLES..."
-                  className="w-full bg-black/40 border border-white/10 rounded-lg py-2 pl-10 pr-4 text-[10px] font-mono uppercase text-white outline-none focus:border-accent/40"
-                />
-              </div>
-
-              <div className="flex-1 overflow-y-auto max-h-[300px] p-2 custom-scrollbar">
-                <div className="grid grid-cols-1 gap-1">
-                  {filteredSamples.map(sample => (
-                    <button
-                      key={sample.id}
-                      onClick={() => {
-                        setPadSamples(prev => ({ ...prev, [editingPad]: sample.id }));
-                        setEditingPad(null);
-                        setSearchTerm("");
-                      }}
-                      className={cn(
-                        "w-full flex items-center justify-between p-3 rounded-xl transition-all group/item",
-                        padSamples[editingPad] === sample.id 
-                          ? "bg-accent/10 border border-accent/40 text-accent" 
-                          : "bg-white/5 hover:bg-white/10 text-secondary hover:text-white"
-                      )}
-                    >
-                      <div className="flex flex-col items-start px-2">
-                        <span className="text-[10px] font-black uppercase tracking-widest">{sample.name}</span>
-                        <span className="text-[7px] font-mono opacity-40 uppercase">{sample.category}</span>
-                      </div>
-                      {padSamples[editingPad] === sample.id && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-accent mr-2 shadow-[0_0_5px_rgba(59,130,246,0.5)]" />
-                      )}
-                    </button>
-                  ))}
+              <div className="p-4 overflow-y-auto custom-scrollbar">
+                <div className="space-y-6">
+                    <div>
+                        <h5 className="text-[9px] font-mono text-secondary uppercase mb-2">Sample Path</h5>
+                        <div className="grid grid-cols-1 gap-1">
+                          {filteredSamples.map(sample => (
+                            <button
+                              key={sample.id}
+                              onClick={() => setPadSamples(prev => ({ ...prev, [editingPad!]: sample.id }))}
+                              className={cn(
+                                "w-full flex items-center justify-between p-2 rounded-lg text-[9px] font-black uppercase transition-all",
+                                padSamples[editingPad!] === sample.id 
+                                  ? "bg-accent/10 border border-accent/40 text-accent" 
+                                  : "bg-white/5 hover:bg-white/10 text-secondary hover:text-white"
+                              )}
+                            >
+                              <span>{sample.name}</span>
+                              {padSamples[editingPad!] === sample.id && <div className="w-1 h-1 rounded-full bg-accent" />}
+                            </button>
+                          ))}
+                        </div>
+                    </div>
+                    {/* SCULPTING UI */}
+                    <div>
+                        <h5 className="text-[9px] font-mono text-secondary uppercase mb-2">Sound Sculpting</h5>
+                        <div className="grid grid-cols-2 gap-2">
+                        {(['attack', 'decay', 'sustain', 'release', 'cutoff', 'resonance'] as const).map(param => (
+                            <div key={param} className="space-y-1">
+                                <label className="text-[8px] font-mono text-secondary uppercase italic">{param}</label>
+                                <input 
+                                    type="range"
+                                    min={param === 'cutoff' ? 20 : param === 'resonance' ? 0 : 0.001}
+                                    max={param === 'cutoff' ? 20000 : param === 'resonance' ? 20 : 2}
+                                    step="0.01"
+                                    value={padSettings[editingPad!][param]}
+                                    onChange={(e) => {
+                                        const val = parseFloat(e.target.value);
+                                        setPadSettings(prev => ({
+                                            ...prev,
+                                            [editingPad!]: { ...prev[editingPad!], [param]: val }
+                                        }));
+                                        
+                                        const env = envelopesRef.current.get(editingPad!);
+                                        const filt = filterRef.current.get(editingPad!);
+                                        if (env && (['attack', 'decay', 'sustain', 'release'].includes(param))) {
+                                            env.set({ [param]: val });
+                                        }
+                                        if (filt && (['cutoff', 'resonance'].includes(param))) {
+                                            filt.set({ [param === 'cutoff' ? 'frequency' : 'Q']: val });
+                                        }
+                                    }}
+                                    className="w-full accent-accent h-1"
+                                />
+                            </div>
+                        ))}
+                        </div>
+                    </div>
                 </div>
               </div>
             </motion.div>
@@ -239,9 +281,20 @@ export const DrumMachine: React.FC<DrumMachineProps> = ({ onAddLayer, bpm }) => 
           </div>
           <div>
             <h3 className="text-xs font-black uppercase tracking-widest text-white/90 italic">Drum Designer</h3>
-            <p className="text-[8px] font-mono text-secondary uppercase tracking-tighter">
-              {samplerRef.current ? "Custom Kit Loaded // Live Dub" : "SYNCHING SAMPLES..."}
-            </p>
+            <div className="flex flex-col gap-1">
+              <p className="text-[8px] font-mono text-secondary uppercase tracking-tighter">
+                {isLoaded ? "Custom Kit Loaded // Live Dub" : `SYNCHING SAMPLES... ${Math.round(loadProgress * 100)}%`}
+              </p>
+              {!isLoaded && (
+                <div className="w-24 h-0.5 bg-white/5 rounded-full overflow-hidden">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${loadProgress * 100}%` }}
+                    className="h-full bg-accent"
+                  />
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -284,7 +337,6 @@ export const DrumMachine: React.FC<DrumMachineProps> = ({ onAddLayer, bpm }) => 
         </div>
       </div>
 
-      {/* Progress Tracker */}
       <div className="h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-border/10 inner-shadow">
         <motion.div 
           className="h-full bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]"

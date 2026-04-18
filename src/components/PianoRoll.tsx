@@ -199,17 +199,23 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ onAddLayer, bpm }) => {
               const fullNote = `${noteName}${octave}`;
               const isBlack = noteName.includes("#");
               return (
-                <button
+                <motion.button
                   key={fullNote}
                   onMouseDown={() => playNote(fullNote)}
                   onMouseUp={() => stopNote(fullNote)}
                   onMouseLeave={() => stopNote(fullNote)}
+                  animate={{
+                    backgroundColor: activeNotes.has(fullNote) 
+                      ? (isBlack ? "#f97316" : "rgba(249, 115, 22, 0.3)")
+                      : (isBlack ? "#000" : "#fff"),
+                    scale: activeNotes.has(fullNote) ? 0.98 : 1,
+                  }}
                   className={cn(
-                    "flex-shrink-0 transition-all rounded-b-lg border-x border-b",
+                    "flex-shrink-0 transition-all rounded-b-lg border-x border-b relative",
                     isBlack 
-                      ? "w-8 h-2/3 bg-black border-border/60 z-10 -mx-4 shadow-xl" 
-                      : "w-12 h-full bg-white border-gray-200 z-0",
-                    activeNotes.has(fullNote) && (isBlack ? "bg-accent brightness-150" : "bg-accent/20 border-accent")
+                      ? "w-8 h-2/3 border-border/60 z-10 -mx-4 shadow-xl" 
+                      : "w-12 h-full border-gray-200 z-0",
+                    activeNotes.has(fullNote) && (isBlack ? "brightness-150 shadow-[0_0_20px_rgba(249,115,22,0.6)]" : "border-accent shadow-[0_0_15px_rgba(249,115,22,0.3)]")
                   )}
                 >
                   <span className={cn(
@@ -218,7 +224,7 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ onAddLayer, bpm }) => {
                   )}>
                     {fullNote}
                   </span>
-                </button>
+                </motion.button>
               );
             })
           )}
