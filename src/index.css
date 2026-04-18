@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Avenir Next", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   --color-accent: #3b82f6;
   --color-secondary: #94a3b8;
@@ -17,75 +17,113 @@
   }
 
   body {
-    @apply bg-[#0a0a0a] text-white antialiased;
+    @apply bg-[#050505] text-white antialiased;
   }
 }
 
 @layer components {
   .hardware-card {
-    @apply bg-black/40 border border-border/50 rounded-lg backdrop-blur-md shadow-2xl;
+    @apply bg-[#151619] border border-[#2a2d33] rounded-xl shadow-[0_20px_40px_rgba(0,0,0,0.4)] relative overflow-hidden;
+    background-image: 
+      linear-gradient(135deg, rgba(255,255,255,0.02) 0%, transparent 100%),
+      url("https://www.transparenttextures.com/patterns/dark-matter.png");
+  }
+
+  .hardware-shadow {
+    box-shadow: 
+      0 1px 0 rgba(255, 255, 255, 0.05) inset,
+      0 10px 20px rgba(0, 0, 0, 0.5),
+      0 6px 6px rgba(0, 0, 0, 0.5);
   }
 
   .lcd-display {
-    @apply bg-[#0d1117] border-2 border-border/30 rounded-lg shadow-inner;
+    @apply bg-[#0d1117] border-2 border-[#1e293b] rounded-lg shadow-[inset_0_4px_12px_rgba(0,0,0,0.8)] p-4 relative overflow-hidden;
+    background-image: 
+      radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.05) 0%, transparent 80%),
+      repeating-linear-gradient(0deg, transparent, transparent 1px, rgba(0,0,0,0.1) 1px, rgba(0,0,0,0.1) 2px);
+  }
+
+  .led-indicator {
+    @apply w-2 h-2 rounded-full;
+    box-shadow: 0 0 8px currentColor;
   }
 
   .waveform-bar {
-    @apply w-1 bg-accent rounded-full;
+    @apply w-1.5 bg-accent rounded-full;
+    box-shadow: 0 0 10px var(--accent-glow);
   }
 
   .knob {
-    @apply w-6 h-6 rounded-full bg-gradient-to-b from-border/50 to-black border border-border/30 relative;
+    @apply w-8 h-8 rounded-full bg-gradient-to-b from-[#2a2d33] to-[#151619] border border-[#373b42] relative cursor-pointer shadow-lg;
   }
 
   .knob::after {
     content: '';
-    @apply absolute top-1 left-1/2 -translate-x-1/2 w-0.5 h-2 bg-accent rounded-full;
+    @apply absolute top-1 left-1/2 -translate-x-1/2 w-0.5 h-2.5 bg-accent rounded-full shadow-[0_0_5px_var(--accent-glow)];
   }
 
   .recording-glow {
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
-    animation: pulse-red 2s infinite;
+    box-shadow: 0 0 30px rgba(239, 68, 68, 0.4);
+    animation: pulse-red-hardware 1.5s infinite;
   }
 
-  @keyframes pulse-red {
-    0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-    70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  @keyframes pulse-red-hardware {
+    0% { filter: brightness(1) drop-shadow(0 0 0px rgba(239, 68, 68, 0)); }
+    50% { filter: brightness(1.5) drop-shadow(0 0 15px rgba(239, 68, 68, 0.6)); }
+    100% { filter: brightness(1) drop-shadow(0 0 0px rgba(239, 68, 68, 0)); }
   }
 
   .custom-scrollbar::-webkit-scrollbar {
-    width: 4px;
+    width: 6px;
   }
-
   .custom-scrollbar::-webkit-scrollbar-track {
-    @apply bg-transparent;
+    @apply bg-black/20 rounded-full;
   }
-
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    @apply bg-border/50 rounded-full hover:bg-accent/50 transition-colors;
-  }
-
-  .custom-audio-player::-webkit-media-controls-panel {
-    @apply bg-black/40;
-  }
-
-  .custom-audio-player::-webkit-media-controls-current-time-display,
-  .custom-audio-player::-webkit-media-controls-time-remaining-display {
-    @apply text-accent font-mono text-[10px];
+    @apply bg-[#2a2d33] rounded-full border border-white/5 hover:bg-accent/40 transition-colors;
   }
 
   .bpm-value {
     @apply text-5xl font-black tracking-tighter text-accent;
-    text-shadow: 0 0 20px var(--accent-glow);
+    text-shadow: 0 0 30px var(--accent-glow);
     font-variant-numeric: tabular-nums;
   }
 
   .bpm-label {
-    @apply text-[10px] font-mono text-secondary uppercase tracking-[0.4em] opacity-80;
+    @apply text-[9px] font-mono text-secondary uppercase tracking-[0.5em] opacity-60;
+  }
+
+  .inner-shadow {
+    box-shadow: inset 1px 1px 3px rgba(0,0,0,0.8), 1px 1px 0px rgba(255,255,255,0.05);
+  }
+
+  .hardware-glow {
+    @apply relative after:absolute after:inset-0 after:bg-accent/5 after:pointer-events-none after:rounded-xl;
+  }
+
+  .perspective-container {
+    perspective: 1200px;
+  }
+
+  .tilt-card {
+    transition: transform 0.1s ease-out;
+    transform-style: preserve-3d;
   }
 
   .glass-panel {
-    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-lg;
+    @apply bg-black/40 backdrop-blur-md border border-white/5 shadow-2xl;
+    background-image: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 100%);
+  }
+
+  .studio-shelf {
+    @apply fixed bottom-0 left-0 w-full p-4 border-t border-white/10 z-50 flex items-center justify-between px-12;
+    @apply bg-black/40 backdrop-blur-md shadow-2xl;
+    background-image: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 100%);
+    transform: translateY(calc(100% - 4px));
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .studio-shelf:hover {
+    transform: translateY(0);
   }
 }

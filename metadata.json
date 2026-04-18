@@ -1,6 +1,6 @@
 {
-  "name": "HumSync",
-  "description": "Transform your humming into professional melodies and tracks using AI.",
+  "name": "HumSync Pro DAW",
+  "description": "Professional-grade AI music production workstation with Hum-to-MIDI synthesis, step sequencing, and master-quality arrangement.",
   "requestFramePermissions": [
     "microphone"
   ]

@@ -5,11 +5,10 @@ import { cn } from "@/lib/utils";
 
 interface AudioRecorderProps {
   onRecordingComplete: (blob: Blob) => void;
-  onError?: (message: string) => void;
   isProcessing: boolean;
 }
 
-export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onError, isProcessing }) => {
+export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, isProcessing }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioLevels, setAudioLevels] = useState<number[]>(new Array(30).fill(2));
@@ -71,7 +70,6 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplet
 
     } catch (err) {
       console.error("Error accessing microphone:", err);
-      onError?.("Microphone access failed. Allow microphone permission in the browser and try again.");
     }
   };
 

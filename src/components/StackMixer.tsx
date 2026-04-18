@@ -3,6 +3,7 @@ import * as Tone from "tone";
 import { Play, Pause, Download, Music, Sparkles, Loader2, Volume2, Settings2, Activity, Trash2, Layers } from "lucide-react";
 import { Note, generateFullTrack, Layer, SPECTRUM_ZONES } from "@/services/gemini";
 import { cn } from "@/lib/utils";
+import { motion } from "motion/react";
 
 declare global {
   interface Window {
@@ -200,41 +201,54 @@ The final output should be a cohesive, polished composition that respects the ch
             const zoneInfo = SPECTRUM_ZONES.find(z => z.name === layer.frequencyZone);
             
             return (
-              <div key={layer.id} className="flex flex-col gap-2 p-4 bg-black/40 border border-border/50 rounded-xl group hover:border-accent/30 transition-all">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center text-accent text-sm font-mono border border-accent/20">
-                    {layer.instrument.charAt(0).toUpperCase()}
+              <div key={layer.id} className="flex flex-col gap-4 p-5 hardware-card bg-black/40 border-border/30 group hover:border-accent/40 transition-all hardware-shadow">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-[#0d1117] flex flex-col items-center justify-center border border-[#1e293b] shadow-inner relative overflow-hidden group-hover:border-accent/30 transition-all">
+                    <div className="absolute top-0 left-0 w-full h-[1px] bg-white/5" />
+                    <span className="text-accent font-black text-xs relative z-10">{layer.instrument.charAt(0).toUpperCase()}</span>
+                    <div className="absolute bottom-1 w-6 h-0.5 bg-accent/20 rounded-full" />
                   </div>
+                  
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-white">{layer.instrument}</span>
-                        <span className="text-[9px] px-2 py-0.5 bg-accent/20 rounded-full text-accent uppercase font-bold tracking-wider">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-white/90">{layer.instrument}</span>
+                        <div className="px-2 py-0.5 rounded-sm bg-accent/10 border border-accent/20 text-accent text-[7px] font-mono uppercase tracking-widest">
                           {layer.role}
-                        </span>
+                        </div>
                       </div>
                       <button 
                         onClick={() => onRemoveLayer(layer.id)}
-                        className="p-1.5 text-secondary hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                        className="p-1.5 text-secondary/40 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <div 
-                        className="w-1.5 h-1.5 rounded-full" 
-                        style={{ backgroundColor: zoneInfo?.color || '#ccc' }} 
-                      />
-                      <span className="text-[9px] font-mono text-secondary uppercase tracking-tighter">
-                        {layer.frequencyZone} ({zoneInfo?.range[0]}-{zoneInfo?.range[1]}Hz)
-                      </span>
+                    
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5">
+                        <div 
+                          className="w-1.5 h-1.5 rounded-full led-indicator" 
+                          style={{ color: zoneInfo?.color || '#ccc' }} 
+                        />
+                        <span className="text-[8px] font-mono text-secondary uppercase tracking-widest">
+                          {layer.frequencyZone}
+                        </span>
+                      </div>
+                      <div className="h-1 flex-1 bg-black rounded-full border border-white/5 relative overflow-hidden">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: "80%" }}
+                          className="absolute h-full bg-accent/30"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
                 
-                <div className="mt-2 pt-2 border-t border-border/20">
-                  <p className="text-[10px] text-secondary leading-relaxed italic">
-                    "{layer.geminiDescription}"
+                <div className="lcd-display py-2 px-3 opacity-60 group-hover:opacity-90 transition-opacity">
+                  <p className="text-[9px] font-mono text-accent leading-relaxed italic uppercase tracking-tighter">
+                    // ANALYZING_CHARACTER: "{layer.geminiDescription}"
                   </p>
                 </div>
               </div>
